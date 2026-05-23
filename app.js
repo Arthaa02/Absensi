@@ -26,7 +26,7 @@ if (SUPABASE_URL !== 'YOUR_SUPABASE_URL' && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE
    SECTION 1: CONSTANTS & STATE
    ============================================================ */
 
-const OFFICE_DEFAULTS = { lat: -6.1754, lng: 106.8272, radius: 100 };
+const OFFICE_DEFAULTS = { lat: -6.1754, lng: 106.8272, radius: 200 };
 
 const LOCATIONS = ['HQ - Lantai 1', 'HQ - Lantai 2', 'HQ - Lantai 3', 'HQ - Gerbang A', 'Remote - VPN', 'WFH'];
 
@@ -51,6 +51,7 @@ let state = {
   charts: {},
   historyPage: 1,
   historyPageSize: 10,
+  authNavigatedToRegister: false,
 };
 
 /* ============================================================
@@ -287,6 +288,12 @@ function haversine(lat1, lng1, lat2, lng2) {
 function mapsTo(pageId) {
   const user = state.currentUser;
 
+  // Clear viewing state when navigating to team page
+  if (pageId === 'team') {
+    state._viewingNik = null;
+    sessionStorage.removeItem('ap_viewing_nik');
+  }
+
   // Check RBAC
   const target = document.getElementById(`page-${pageId}`);
   if (target) {
@@ -294,7 +301,7 @@ function mapsTo(pageId) {
     if (allowed && !allowed.split(',').includes(user?.role)) {
       // Redirect to a default allowed page
       const fallback = user?.role === 'intern' ? 'attendance' : 'dashboard';
-      mapsTo(fallback);
+      window.location.hash = fallback;
       return;
     }
   }
@@ -326,6 +333,16 @@ function mapsTo(pageId) {
     case 'history': refreshHistory(); break;
     case 'team': refreshTeam(); break;
     case 'settings': refreshSettings(); break;
+    case 'signout': {
+      const sessionEl = document.getElementById('logout-sess-id');
+      if (sessionEl) {
+        const randNum = Math.floor(1000 + Math.random() * 9000);
+        const randChars = Math.random().toString(36).substring(2, 4).toUpperCase();
+        const randSfx = String(Math.floor(Math.random() * 99)).padStart(2, '0');
+        sessionEl.textContent = `Sess_ID: ${randNum}-${randChars}-${randSfx}`;
+      }
+      break;
+    }
   }
 }
 
@@ -346,29 +363,254 @@ function applyRBAC() {
    SECTION 9: AUTHENTICATION
    ============================================================ */
 
-function initLogin() {
-  console.log("initLogin() called, binding submit listener...");
-  const form = document.getElementById('login-form');
-  form.addEventListener('submit', e => {
-    e.preventDefault();
-    const name = document.getElementById('login-name').value.trim();
-    const nik = document.getElementById('login-nik').value.trim().toUpperCase();
-    const role = document.getElementById('login-role').value;
+/* ============================================================
+   AUTH HELPERS — panel switching
+   ============================================================ */
 
-    if (!name || !nik || !role) {
-      showToast('Harap isi semua kolom terlebih dahulu.', 'error');
+function showLoginPanel() {
+  const loginPanel = document.getElementById('login-panel');
+  const registerPanel = document.getElementById('register-panel');
+  const title = document.getElementById('auth-modal-title');
+  const subtitle = document.getElementById('auth-modal-subtitle');
+
+  registerPanel.classList.add('auth-panel--hidden');
+  loginPanel.classList.remove('auth-panel--hidden');
+  loginPanel.classList.add('slide-back');
+  setTimeout(() => loginPanel.classList.remove('slide-back'), 300);
+
+  if (title) title.textContent = 'Tel Intern';
+  if (subtitle) subtitle.textContent = 'Akses aman ke sistem manajemen.';
+}
+
+function showRegisterPanel() {
+  const loginPanel = document.getElementById('login-panel');
+  const registerPanel = document.getElementById('register-panel');
+  const title = document.getElementById('auth-modal-title');
+  const subtitle = document.getElementById('auth-modal-subtitle');
+
+  loginPanel.classList.add('auth-panel--hidden');
+  registerPanel.classList.remove('auth-panel--hidden');
+  registerPanel.classList.remove('slide-back');
+
+  if (title) title.textContent = 'Daftar Akun';
+  if (subtitle) subtitle.textContent = 'Buat akun intern baru.';
+}
+
+/* Helper: pasang toggle show/hide password */
+function bindPasswordToggle(toggleId, inputId) {
+  const btn = document.getElementById(toggleId);
+  const inp = document.getElementById(inputId);
+  if (!btn || !inp) return;
+  btn.addEventListener('click', () => {
+    const hidden = inp.type === 'password';
+    inp.type = hidden ? 'text' : 'password';
+    const icon = btn.querySelector('.material-symbols-outlined');
+    if (icon) icon.textContent = hidden ? 'visibility_off' : 'visibility';
+  });
+}
+
+/* ============================================================
+   INIT LOGIN
+   ============================================================ */
+function initLogin() {
+  console.log("initLogin() called...");
+
+  /* ── Password toggles ── */
+  bindPasswordToggle('toggle-password', 'login-password');
+  bindPasswordToggle('toggle-reg-password', 'reg-password');
+  bindPasswordToggle('toggle-reg-confirm', 'reg-confirm');
+
+  /* ── Panel switching ── */
+  document.getElementById('show-register-btn')?.addEventListener('click', () => {
+    sessionStorage.setItem('navigated_to_register', 'true');
+    window.location.hash = 'register';
+  });
+  document.getElementById('back-to-login-btn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (sessionStorage.getItem('navigated_to_register') === 'true') {
+      sessionStorage.removeItem('navigated_to_register');
+      history.back();
+    } else {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      showLoginPanel();
+    }
+  });
+
+  /* ── Back button (hardware/gesture) & forward button support via hashchange ── */
+  window.addEventListener('hashchange', () => {
+    const hash = window.location.hash;
+
+    if (!state.currentUser) {
+      if (hash === '#register') {
+        showRegisterPanel();
+      } else {
+        sessionStorage.removeItem('navigated_to_register');
+        showLoginPanel();
+      }
+    } else {
+      const pageId = hash ? hash.slice(1) : (state.currentUser.role === 'intern' ? 'attendance' : 'dashboard');
+      const validPages = ['dashboard', 'attendance', 'performance', 'history', 'team', 'settings', 'signout'];
+      if (validPages.includes(pageId)) {
+        if (pageId === 'performance') {
+          sessionStorage.setItem('navigated_to_perf', 'true');
+        } else {
+          sessionStorage.removeItem('navigated_to_perf');
+        }
+        mapsTo(pageId);
+      }
+    }
+  });
+
+  // Sinkronisasi panel berdasarkan hash pada saat inisialisasi awal
+  if (window.location.hash === '#register') {
+    if (sessionStorage.getItem('navigated_to_register') !== 'true') {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      history.pushState(null, '', '#register');
+      sessionStorage.setItem('navigated_to_register', 'true');
+    }
+    showRegisterPanel();
+  } else {
+    showLoginPanel();
+  }
+
+  /* ── Forgot / contact (placeholder toasts) ── */
+  document.getElementById('forgot-password-btn')?.addEventListener('click', () => {
+    showToast('Hubungi admin untuk reset password. Lihat kontak di halaman Tim.', 'info');
+  });
+  document.getElementById('contact-admin-btn')?.addEventListener('click', () => {
+    showToast('Silakan hubungi admin sistem melalui email atau WhatsApp grup intern.', 'info');
+  });
+
+  /* ════════════════════════════════════════════
+     FORM LOGIN — Nama + NIK + Password → backend
+     ════════════════════════════════════════════ */
+  const loginForm = document.getElementById('login-form');
+  loginForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const name = document.getElementById('login-name')?.value.trim();
+    const nik  = document.getElementById('login-nik')?.value.trim().toUpperCase();
+    const password = document.getElementById('login-password')?.value;
+
+    if (!name || !nik || !password) {
+      showToast('Nama, NIK, dan password wajib diisi.', 'error');
       return;
     }
 
-    const user = { name, nik, role, cohort: '2024', loginTime: new Date().toISOString() };
-    LS.set('ap_user', user);
-    state.currentUser = user;
+    const btn = document.getElementById('login-submit-btn');
+    const lbl = btn?.querySelector('span:first-child');
+    if (btn) btn.disabled = true;
+    if (lbl) lbl.textContent = 'Memverifikasi…';
 
-    // Load or generate records
-    state.records = LS.get('ap_records', {});
-    ensureAllRecords();
+    try {
+      const res = await fetch('http://localhost:3001/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nik, password }),
+      });
+      const data = await res.json();
 
-    bootApp();
+      if (!res.ok) {
+        showToast(data.error || 'Login gagal. Periksa NIK dan password.', 'error');
+        return;
+      }
+
+      /* Simpan token */
+      if (window.Auth) { Auth.saveToken(data.token); Auth.saveUser(data.user); }
+
+      /* Role DARI BACKEND — tidak bisa dipalsukan */
+      const user = {
+        name:      data.user.name,
+        nik:       data.user.nik,
+        role:      data.user.role,
+        cohort:    data.user.cohort,
+        loginTime: new Date().toISOString(),
+      };
+      LS.set('ap_user', user);
+      state.currentUser = user;
+
+      state.records = LS.get('ap_records', {});
+      ensureAllRecords();
+      bootApp();
+
+    } catch (err) {
+      console.error('Login network error:', err);
+      showToast('Tidak dapat terhubung ke server. Pastikan backend berjalan di port 3001.', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (lbl) lbl.textContent = 'Masuk';
+    }
+  });
+
+  /* ════════════════════════════════════════════
+     FORM REGISTER — Nama + NIK + Password → backend
+     (role dikunci 'intern' oleh backend)
+     ════════════════════════════════════════════ */
+  const registerForm = document.getElementById('register-form');
+  registerForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const name     = document.getElementById('reg-name')?.value.trim();
+    const nik      = document.getElementById('reg-nik')?.value.trim().toUpperCase();
+    const password = document.getElementById('reg-password')?.value;
+    const confirm  = document.getElementById('reg-confirm')?.value;
+
+    if (!name || !nik || !password || !confirm) {
+      showToast('Semua field wajib diisi.', 'error');
+      return;
+    }
+    if (password.length < 6) {
+      showToast('Password minimal 6 karakter.', 'error');
+      return;
+    }
+    if (password !== confirm) {
+      showToast('Konfirmasi password tidak cocok.', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('register-submit-btn');
+    const lbl = btn?.querySelector('span:first-child');
+    if (btn) btn.disabled = true;
+    if (lbl) lbl.textContent = 'Mendaftarkan…';
+
+    try {
+      const res = await fetch('http://localhost:3001/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, nik, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        showToast(data.error || 'Pendaftaran gagal. Coba lagi.', 'error');
+        return;
+      }
+
+      /* Simpan token dari register */
+      if (window.Auth) { Auth.saveToken(data.token); Auth.saveUser(data.user); }
+
+      /* Login langsung setelah register */
+      const user = {
+        name:      data.user.name,
+        nik:       data.user.nik,
+        role:      data.user.role,   // selalu 'intern'
+        cohort:    data.user.cohort,
+        loginTime: new Date().toISOString(),
+      };
+      LS.set('ap_user', user);
+      state.currentUser = user;
+
+      state.records = LS.get('ap_records', {});
+      ensureAllRecords();
+      bootApp();
+
+    } catch (err) {
+      console.error('Register network error:', err);
+      showToast('Tidak dapat terhubung ke server. Pastikan backend berjalan di port 3001.', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (lbl) lbl.textContent = 'Buat Akun';
+    }
   });
 }
 
@@ -383,15 +625,25 @@ function logout() {
   state.charts = {};
 
   LS.remove('ap_user');
+  if (window.Auth && typeof window.Auth.clearToken === 'function') {
+    window.Auth.clearToken();
+  }
   state.currentUser = null;
   state.todayCheckedIn = false;
   state.todayCheckedOut = false;
+
+  // Reset history/hash state
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+  sessionStorage.removeItem('navigated_to_register');
+  sessionStorage.removeItem('ap_viewing_nik');
+  sessionStorage.removeItem('navigated_to_perf');
 
   // Show login, hide app
   document.getElementById('app-shell').style.display = 'none';
   const loginPage = document.getElementById('page-login');
   loginPage.classList.remove('hidden');
   loginPage.style.display = '';
+  showLoginPanel();
 
   // Clear form
   document.getElementById('login-form').reset();
@@ -402,6 +654,8 @@ function logout() {
    ============================================================ */
 
 function bootApp() {
+  sessionStorage.removeItem('navigated_to_register');
+
   // Hide login
   const loginPage = document.getElementById('page-login');
   loginPage.style.display = 'none';
@@ -429,9 +683,26 @@ function bootApp() {
   if (todayRec && todayRec.timeIn) state.todayCheckedIn = true;
   if (todayRec && todayRec.timeOut) state.todayCheckedOut = true;
 
-  // Navigate to default page
-  const defaultPage = u.role === 'intern' ? 'attendance' : 'dashboard';
-  mapsTo(defaultPage);
+  // Navigate to page based on current hash or default
+  const validPages = ['dashboard', 'attendance', 'performance', 'history', 'team', 'settings', 'signout'];
+  let defaultPage = window.location.hash ? window.location.hash.slice(1) : '';
+  if (!validPages.includes(defaultPage)) {
+    defaultPage = u.role === 'intern' ? 'attendance' : 'dashboard';
+  }
+
+  // Update hash to trigger routing, or force load if already matching
+  if (defaultPage === 'performance' && u.role !== 'intern' && sessionStorage.getItem('ap_viewing_nik')) {
+    if (sessionStorage.getItem('navigated_to_perf') !== 'true') {
+      history.replaceState(null, '', '#team');
+      history.pushState(null, '', '#performance');
+      sessionStorage.setItem('navigated_to_perf', 'true');
+    }
+    mapsTo('performance');
+  } else if (window.location.hash !== '#' + defaultPage) {
+    window.location.hash = defaultPage;
+  } else {
+    mapsTo(defaultPage);
+  }
 
   // Start clock
   startClock();
@@ -821,7 +1092,7 @@ function refreshPerformance() {
   const isIntern = user?.role === 'intern';
 
   // Admin can drill into a specific intern's record via viewInternPerf()
-  const viewingNik = state._viewingNik || null;
+  const viewingNik = state._viewingNik || sessionStorage.getItem('ap_viewing_nik') || null;
   const targetNik  = (isIntern || !viewingNik) ? user.nik : viewingNik;
   const targetUser = viewingNik ? (DUMMY_INTERNS.find(u => u.nik === viewingNik) || user) : user;
 
@@ -835,6 +1106,15 @@ function refreshPerformance() {
 
   setText('perf-name', displayName);
   setText('perf-role', displayRole);
+
+  const backBtn = document.getElementById('perf-back-btn');
+  if (backBtn) {
+    if (!isIntern && viewingNik) {
+      backBtn.style.display = 'inline-flex';
+    } else {
+      backBtn.style.display = 'none';
+    }
+  }
 
   const m = calcMetrics(targetNik);
   setText('perf-streak', `${m.streak}`);
@@ -1010,7 +1290,15 @@ function renderTeamTable(filter = '') {
       <td>${m.streak} hari</td>
       <td>${m.onTimePct}%</td>
       <td>${statusBadge(todayStatus)}</td>
-      <td><button class="btn-text" onclick="viewInternPerf('${intern.nik}')">Lihat →</button></td>
+      <td>
+        <button class="btn-text" onclick="viewInternPerf('${intern.nik}')">Lihat →</button>
+        <button class="btn-text" onclick="exportInternCSV('${intern.nik}')" title="Ekspor CSV" style="margin-left: 8px;">
+          <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">download</span> CSV
+        </button>
+        <button class="btn-text" onclick="exportInternPDF('${intern.nik}')" title="Ekspor PDF" style="margin-left: 8px; color: var(--brand);">
+          <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">picture_as_pdf</span> PDF
+        </button>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -1020,7 +1308,8 @@ function viewInternPerf(nik) {
   if (!intern) return;
   // Temporarily set as viewing subject then go to performance
   state._viewingNik = nik;
-  mapsTo('performance');
+  sessionStorage.setItem('ap_viewing_nik', nik);
+  window.location.hash = 'performance';
 }
 
 /** --- SETTINGS --- */
@@ -1182,6 +1471,238 @@ function statusBadge(status) {
 }
 
 /* ============================================================
+   SECTION 17b: EXPORT UTILITIES
+   ============================================================ */
+
+/** Export attendance records to CSV for a list of NIKs */
+function exportAttendanceToCSV(niks, filename) {
+  const allRecs = [];
+  const user = state.currentUser;
+  niks.forEach(nik => {
+    const who = DUMMY_INTERNS.find(u => u.nik === nik) || (user?.nik === nik ? user : null);
+    if (!who) return;
+    (state.records[nik] || []).forEach(r => {
+      allRecs.push([
+        r.date,
+        who.name || nik,
+        nik,
+        r.timeIn  ? fmtTime12(new Date(r.timeIn))  : '—',
+        r.timeOut ? fmtTime12(new Date(r.timeOut)) : '—',
+        r.location || 'N/A',
+        r.status,
+      ]);
+    });
+  });
+  allRecs.sort((a, b) => b[0].localeCompare(a[0]));
+  const headers = ['Tanggal', 'Nama', 'NIK', 'Waktu Masuk', 'Waktu Keluar', 'Lokasi', 'Status'];
+  const csv = [headers, ...allRecs].map(row => row.map(c => `"${c}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Laporan CSV berhasil diunduh!', 'success');
+}
+
+/** Row-level intern CSV export */
+function exportInternCSV(nik) {
+  const intern = DUMMY_INTERNS.find(u => u.nik === nik);
+  if (!intern) return;
+  const filename = `laporan_kehadiran_${intern.name.replace(/\s+/g, '_')}_${todayKey()}.csv`;
+  exportAttendanceToCSV([nik], filename);
+}
+
+/** Export attendance records to PDF for a list of NIKs */
+function exportAttendanceToPDF(niks, filename, titleText = 'Laporan Kehadiran') {
+  if (!window.jspdf) {
+    showToast('Library PDF belum siap atau gagal dimuat.', 'error');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const allRecs = [];
+  const user = state.currentUser;
+
+  // Collect data
+  niks.forEach(nik => {
+    const who = DUMMY_INTERNS.find(u => u.nik === nik) || (user?.nik === nik ? user : null);
+    if (!who) return;
+    (state.records[nik] || []).forEach(r => {
+      allRecs.push({
+        date: r.date,
+        name: who.name || nik,
+        nik: nik,
+        timeIn: r.timeIn ? fmtTime12(new Date(r.timeIn)) : '—',
+        timeOut: r.timeOut ? fmtTime12(new Date(r.timeOut)) : '—',
+        location: r.location || 'N/A',
+        status: r.status,
+      });
+    });
+  });
+
+  // Sort descending by date
+  allRecs.sort((a, b) => b.date.localeCompare(a.date));
+
+  // PDF Page Width: 210mm, Height: 297mm
+  const marginX = 15;
+  let currentY = 15;
+
+  // Header Title
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(30, 41, 59); // Slate 800
+  doc.text(titleText.toUpperCase(), marginX, currentY);
+  currentY += 6;
+
+  // Subtitle
+  doc.setFont('Helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139); // Slate 500
+  doc.text('PILLAR MANAGEMENT SYSTEM — LAPORAN KEHADIRAN MAGANG', marginX, currentY);
+  currentY += 4;
+
+  // Thin line
+  doc.setDrawColor(226, 232, 240); // Slate 200
+  doc.setLineWidth(0.5);
+  doc.line(marginX, currentY, 210 - marginX, currentY);
+  currentY += 8;
+
+  // Metadata Section
+  doc.setFontSize(10);
+  if (niks.length === 1) {
+    const targetNik = niks[0];
+    const who = DUMMY_INTERNS.find(u => u.nik === targetNik) || (user?.nik === targetNik ? user : null);
+    const m = calcMetrics(targetNik);
+
+    // Left Column Info
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(71, 85, 105); // Slate 600
+    doc.text('Informasi Intern:', marginX, currentY);
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Nama: ${who.name}`, marginX, currentY + 5);
+    doc.text(`NIK: ${who.nik}`, marginX, currentY + 10);
+    doc.text(`Cohort: ${who.cohort || '2024'}`, marginX, currentY + 15);
+
+    // Right Column Info
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(71, 85, 105);
+    doc.text('Ringkasan Kinerja:', 120, currentY);
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Total Kehadiran: ${m.presentDays} hari`, 120, currentY + 5);
+    doc.text(`Tepat Waktu: ${m.onTimePct}%`, 120, currentY + 10);
+    doc.text(`Total Jam Kerja: ${m.totalHours} jam`, 120, currentY + 15);
+
+    currentY += 23;
+  } else {
+    // Team Report Info
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(71, 85, 105);
+    doc.text('Informasi Laporan Tim:', marginX, currentY);
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Tipe Laporan: Seluruh Anggota Tim`, marginX, currentY + 5);
+    doc.text(`Total Anggota: ${niks.length} Intern`, marginX, currentY + 10);
+    doc.text(`Tanggal Cetak: ${fmtDate(new Date())}`, marginX, currentY + 15);
+
+    // Summary stats for team
+    const totalRecords = allRecs.length;
+    const totalPresent = allRecs.filter(r => r.status === 'Hadir' || r.status === 'WFH').length;
+    const totalLate = allRecs.filter(r => r.status === 'Terlambat').length;
+    const pctOnTime = totalPresent + totalLate > 0 ? (((totalPresent) / (totalPresent + totalLate)) * 100).toFixed(1) : '0.0';
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(71, 85, 105);
+    doc.text('Statistik Kehadiran Tim:', 120, currentY);
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Total Log Data: ${totalRecords} Entri`, 120, currentY + 5);
+    doc.text(`Kehadiran Tepat Waktu: ${totalPresent} kali`, 120, currentY + 10);
+    doc.text(`Kehadiran Terlambat: ${totalLate} kali (${pctOnTime}% tepat waktu)`, 120, currentY + 15);
+
+    currentY += 23;
+  }
+
+  // Draw table using AutoTable
+  const headers = niks.length === 1 
+    ? [['Tanggal', 'Waktu Masuk', 'Waktu Keluar', 'Lokasi', 'Status']]
+    : [['Tanggal', 'Nama', 'NIK', 'Waktu Masuk', 'Waktu Keluar', 'Lokasi', 'Status']];
+
+  const tableData = allRecs.map(r => {
+    const formattedDate = fmtDate(parseKey(r.date));
+    return niks.length === 1
+      ? [formattedDate, r.timeIn, r.timeOut, r.location, r.status]
+      : [formattedDate, r.name, r.nik, r.timeIn, r.timeOut, r.location, r.status];
+  });
+
+  doc.autoTable({
+    startY: currentY,
+    head: headers,
+    body: tableData,
+    theme: 'striped',
+    headStyles: {
+      fillColor: [30, 41, 59], // Slate 800
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 9,
+      halign: 'left',
+    },
+    bodyStyles: {
+      fontSize: 9,
+      textColor: [51, 65, 85], // Slate 700
+    },
+    didParseCell: function(data) {
+      if (data.section === 'body' && data.column.index === headers[0].length - 1) {
+        const val = data.cell.raw;
+        if (val === 'Hadir' || val === 'WFH') {
+          data.cell.styles.textColor = [21, 128, 61]; // Green 700
+        } else if (val === 'Terlambat') {
+          data.cell.styles.textColor = [180, 83, 9]; // Amber 700
+        } else if (val === 'Tidak Hadir' || val === 'Absen') {
+          data.cell.styles.textColor = [196, 16, 32]; // Red / Brand 700
+        } else if (val === 'Izin' || val === 'Sakit') {
+          data.cell.styles.textColor = [100, 116, 139]; // Slate 500
+        }
+      }
+    },
+    margin: { left: marginX, right: marginX },
+    styles: { font: 'Helvetica' },
+    didDrawPage: function(data) {
+      const totalPages = doc.internal.getNumberOfPages();
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // Slate 400
+      
+      const str = `Halaman ${data.pageNumber} dari ${totalPages}`;
+      doc.text(str, data.settings.margin.left, doc.internal.pageSize.height - 10);
+      
+      const printTime = new Date().toLocaleString('id-ID');
+      doc.text(`Dicetak pada: ${printTime}`, doc.internal.pageSize.width - data.settings.margin.right - 55, doc.internal.pageSize.height - 10);
+    }
+  });
+
+  doc.save(filename);
+  showToast('Laporan PDF berhasil diunduh!', 'success');
+}
+
+/** Row-level intern PDF export */
+function exportInternPDF(nik) {
+  const intern = DUMMY_INTERNS.find(u => u.nik === nik);
+  if (!intern) return;
+  const filename = `laporan_kehadiran_${intern.name.replace(/\s+/g, '_')}_${todayKey()}.pdf`;
+  exportAttendanceToPDF([nik], filename, `Laporan Kehadiran - ${intern.name}`);
+}
+
+/* ============================================================
    SECTION 18: DOM HELPERS
    ============================================================ */
 
@@ -1195,13 +1716,24 @@ function setText(id, val) {
    ============================================================ */
 
 function openSidebar() {
-  document.getElementById('sidebar').classList.add('open');
-  const overlay = document.getElementById('sidebar-overlay');
-  overlay.classList.add('visible');
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar && !sidebar.classList.contains('open')) {
+    sidebar.classList.add('open');
+    const overlay = document.getElementById('sidebar-overlay');
+    if (overlay) overlay.classList.add('visible');
+    history.pushState({ sidebar: 'open' }, '');
+  }
 }
 function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('sidebar-overlay').classList.remove('visible');
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar && sidebar.classList.contains('open')) {
+    sidebar.classList.remove('open');
+    const overlay = document.getElementById('sidebar-overlay');
+    if (overlay) overlay.classList.remove('visible');
+    if (history.state && history.state.sidebar === 'open') {
+      history.back();
+    }
+  }
 }
 
 /* ============================================================
@@ -1221,7 +1753,21 @@ function initApp() {
   document.querySelectorAll('.nav-link[data-page]').forEach(link => {
     link.addEventListener('click', e => {
       e.preventDefault();
-      mapsTo(link.dataset.page);
+      const targetPage = link.dataset.page;
+      const sidebar = document.getElementById('sidebar');
+      if (sidebar && sidebar.classList.contains('open')) {
+        sidebar.classList.remove('open');
+        const overlay = document.getElementById('sidebar-overlay');
+        if (overlay) overlay.classList.remove('visible');
+        if (history.state && history.state.sidebar === 'open') {
+          history.back();
+          setTimeout(() => {
+            window.location.hash = targetPage;
+          }, 50);
+          return;
+        }
+      }
+      window.location.hash = targetPage;
     });
   });
 
@@ -1229,7 +1775,7 @@ function initApp() {
   document.querySelectorAll('.bottom-nav-item[data-page]').forEach(link => {
     link.addEventListener('click', e => {
       e.preventDefault();
-      mapsTo(link.dataset.page);
+      window.location.hash = link.dataset.page;
     });
   });
 
@@ -1237,7 +1783,10 @@ function initApp() {
   document.getElementById('checkin-btn').addEventListener('click', handleCheckin);
 
   // ── Logout
-  document.getElementById('logout-btn').addEventListener('click', logout);
+  document.getElementById('logout-btn')?.addEventListener('click', () => {
+    window.location.hash = 'signout';
+  });
+  document.getElementById('confirm-logout-btn')?.addEventListener('click', logout);
 
   // ── Manual entry modal
   const manualBtn = document.getElementById('manual-entry-btn');
@@ -1252,12 +1801,19 @@ function initApp() {
       const dateEl = document.getElementById('me-date');
       if (dateEl) dateEl.value = todayKey();
       modal.style.display = 'flex';
+      history.pushState({ modal: 'manual' }, '');
     });
   }
-  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
-  if (cancelBtn) cancelBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  const closeModal = () => {
+    modal.style.display = 'none';
+    if (history.state && history.state.modal === 'manual') {
+      history.back();
+    }
+  };
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
   if (modal) {
-    modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
   }
 
   if (manualForm) {
@@ -1291,6 +1847,9 @@ function initApp() {
       LS.set('ap_records', state.records);
       modal.style.display = 'none';
       manualForm.reset();
+      if (history.state && history.state.modal === 'manual') {
+        history.back();
+      }
       showToast('Entri berhasil disimpan.', 'success');
     });
   }
@@ -1317,34 +1876,47 @@ function initApp() {
     exportBtn.addEventListener('click', () => {
       const user = state.currentUser;
       const isIntern = user?.role === 'intern';
-      // Collect records to export
-      const niks = isIntern ? [user.nik] : DUMMY_INTERNS.map(u => u.nik);
-      const allRecs = [];
-      niks.forEach(nik => {
-        const who = DUMMY_INTERNS.find(u => u.nik === nik) || user;
-        (state.records[nik] || []).forEach(r => {
-          allRecs.push([
-            r.date,
-            who.name || nik,
-            nik,
-            r.timeIn  ? fmtTime12(new Date(r.timeIn))  : '—',
-            r.timeOut ? fmtTime12(new Date(r.timeOut)) : '—',
-            r.location || 'N/A',
-            r.status,
-          ]);
-        });
-      });
-      allRecs.sort((a, b) => b[0].localeCompare(a[0]));
-      const headers = ['Tanggal', 'Nama', 'NIK', 'Waktu Masuk', 'Waktu Keluar', 'Lokasi', 'Status'];
-      const csv = [headers, ...allRecs].map(row => row.map(c => `"${c}"`).join(',')).join('\n');
-      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-      const url  = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `laporan_kehadiran_${todayKey()}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast('Laporan CSV berhasil diunduh!', 'success');
+      const viewingNik = sessionStorage.getItem('ap_viewing_nik');
+      const targetNik = (isIntern || !viewingNik) ? user.nik : viewingNik;
+      const targetUser = DUMMY_INTERNS.find(u => u.nik === targetNik) || (user?.nik === targetNik ? user : null);
+      const namePart = targetUser ? targetUser.name.replace(/\s+/g, '_') : 'tim';
+      const filename = `laporan_kehadiran_${namePart}_${todayKey()}.csv`;
+      exportAttendanceToCSV([targetNik], filename);
+    });
+  }
+
+  // ── Export PDF button
+  const exportPdfBtn = document.getElementById('export-pdf-btn');
+  if (exportPdfBtn) {
+    exportPdfBtn.addEventListener('click', () => {
+      const user = state.currentUser;
+      const isIntern = user?.role === 'intern';
+      const viewingNik = sessionStorage.getItem('ap_viewing_nik');
+      const targetNik = (isIntern || !viewingNik) ? user.nik : viewingNik;
+      const targetUser = DUMMY_INTERNS.find(u => u.nik === targetNik) || (user?.nik === targetNik ? user : null);
+      const namePart = targetUser ? targetUser.name.replace(/\s+/g, '_') : 'tim';
+      const filename = `laporan_kehadiran_${namePart}_${todayKey()}.pdf`;
+      exportAttendanceToPDF([targetNik], filename, `Laporan Kehadiran - ${targetUser ? targetUser.name : 'Intern'}`);
+    });
+  }
+
+  // ── Team export button
+  const teamExportBtn = document.getElementById('team-export-btn');
+  if (teamExportBtn) {
+    teamExportBtn.addEventListener('click', () => {
+      const niks = DUMMY_INTERNS.map(u => u.nik);
+      const filename = `laporan_kehadiran_tim_${todayKey()}.csv`;
+      exportAttendanceToCSV(niks, filename);
+    });
+  }
+
+  // ── Team export PDF button
+  const teamExportPdfBtn = document.getElementById('team-export-pdf-btn');
+  if (teamExportPdfBtn) {
+    teamExportPdfBtn.addEventListener('click', () => {
+      const niks = DUMMY_INTERNS.map(u => u.nik);
+      const filename = `laporan_kehadiran_tim_${todayKey()}.pdf`;
+      exportAttendanceToPDF(niks, filename, 'Laporan Kehadiran Tim Magang');
     });
   }
 
@@ -1360,10 +1932,48 @@ function initApp() {
 
   // ── Shortcut ke Pengaturan Akun
   document.getElementById('sidebar-user-wrap')?.addEventListener('click', () => {
-    mapsTo('settings');
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && sidebar.classList.contains('open')) {
+      sidebar.classList.remove('open');
+      const overlay = document.getElementById('sidebar-overlay');
+      if (overlay) overlay.classList.remove('visible');
+      if (history.state && history.state.sidebar === 'open') {
+        history.back();
+        setTimeout(() => {
+          window.location.hash = 'settings';
+        }, 50);
+        return;
+      }
+    }
+    window.location.hash = 'settings';
   });
   document.getElementById('topbar-avatar')?.addEventListener('click', () => {
-    mapsTo('settings');
+    window.location.hash = 'settings';
+  });
+
+  // ── Tombol Kembali Kinerja Tim
+  document.getElementById('perf-back-btn')?.addEventListener('click', () => {
+    history.back();
+  });
+
+  // ── Global popstate listener for back key support on overlays
+  window.addEventListener('popstate', (e) => {
+    const stateObj = e.state;
+
+    // Check if manual entry modal is open and should be closed
+    const modal = document.getElementById('manual-modal');
+    if (modal && modal.style.display === 'flex' && (!stateObj || stateObj.modal !== 'manual')) {
+      modal.style.display = 'none';
+      document.getElementById('manual-entry-form')?.reset();
+    }
+
+    // Check if sidebar is open and should be closed
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && sidebar.classList.contains('open') && (!stateObj || stateObj.sidebar !== 'open')) {
+      sidebar.classList.remove('open');
+      const overlay = document.getElementById('sidebar-overlay');
+      if (overlay) overlay.classList.remove('visible');
+    }
   });
 
   // ── Check for persisted session

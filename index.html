@@ -4,11 +4,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pillar</title>
+  <title>Tel Intern</title>
 
   <!-- Global Error Handler for Debugging -->
   <script>
-    window.onerror = function(message, source, lineno, colno, error) {
+    window.onerror = function (message, source, lineno, colno, error) {
       alert("JavaScript Error:\n" + message + "\n\nSource: " + source + "\nLine: " + lineno + "\nColumn: " + colno + "\nStack: " + (error ? error.stack : 'N/A'));
       return false;
     };
@@ -32,6 +32,10 @@
 
   <!-- Supabase JS Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
+
+  <!-- jsPDF & AutoTable for PDF Export -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js" crossorigin="anonymous"></script>
 </head>
 
 <body>
@@ -41,50 +45,140 @@
      ============================================================ -->
   <section class="page" id="page-login">
     <div class="login-bg"></div>
-    <div class="login-modal">
-      <div class="login-logo">
+
+    <!-- PANEL WRAPPER — animasi slide antara login dan register -->
+    <div class="login-modal" id="login-modal-card">
+
+      <!-- ── BRAND HEADER ── -->
+      <div class="login-logo" id="auth-logo">
         <span class="material-symbols-outlined"
           style="font-variation-settings:'FILL' 1;font-size:32px;">domain_verification</span>
       </div>
-      <h1 class="login-title">Pillar</h1>
-      <p class="login-subtitle">Akses aman ke sistem manajemen.</p>
+      <h1 class="login-title" id="auth-modal-title">Tel Intern</h1>
+      <p class="login-subtitle" id="auth-modal-subtitle">Akses aman ke sistem manajemen.</p>
 
-      <form id="login-form" class="login-form" novalidate>
-        <div class="form-group">
-          <label for="login-name">Nama Lengkap</label>
-          <div class="input-wrap">
-            <span class="material-symbols-outlined input-icon">person</span>
-            <input type="text" id="login-name" name="fullName" placeholder="Artha" required autocomplete="name" />
+      <!-- ══ PANEL LOGIN ══ -->
+      <div id="login-panel" class="auth-panel">
+        <form id="login-form" class="login-form" novalidate>
+          <div class="form-group">
+            <label for="login-name">Nama Lengkap</label>
+            <div class="input-wrap">
+              <span class="material-symbols-outlined input-icon">person</span>
+              <input type="text" id="login-name" name="fullName" placeholder="Artha" required autocomplete="name" />
+            </div>
           </div>
-        </div>
-        <div class="form-group">
-          <label for="login-nik">NIK / ID Karyawan</label>
-          <div class="input-wrap">
-            <span class="material-symbols-outlined input-icon">badge</span>
-            <input type="text" id="login-nik" name="nik" placeholder="EMP-12345" required autocomplete="off"
-              class="mono" />
+          <div class="form-group">
+            <label for="login-nik">NIK / ID Magang</label>
+            <div class="input-wrap">
+              <span class="material-symbols-outlined input-icon">badge</span>
+              <input type="text" id="login-nik" name="nik" placeholder="EMP-12345" required autocomplete="off" class="mono" />
+            </div>
           </div>
-        </div>
-        <div class="form-group">
-          <label for="login-role">Peran</label>
-          <div class="input-wrap select-wrap">
-            <span class="material-symbols-outlined input-icon">work</span>
-            <select id="login-role" name="role" required>
-              <option value="" disabled selected>Pilih peran Anda</option>
+          <!-- Role tersembunyi, ditentukan backend -->
+          <div id="login-role-group" style="display:none;">
+            <select id="login-role" name="role">
               <option value="intern">Intern</option>
               <option value="admin">Admin</option>
               <option value="manager">Manager</option>
             </select>
-            <span class="material-symbols-outlined select-arrow">expand_more</span>
           </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <div class="input-wrap">
+              <span class="material-symbols-outlined input-icon">lock</span>
+              <input type="password" id="login-password" name="password" placeholder="Password Anda"
+                required autocomplete="current-password" minlength="6" />
+              <button type="button" id="toggle-password" class="password-toggle"
+                aria-label="Tampilkan password" tabindex="-1">
+                <span class="material-symbols-outlined">visibility</span>
+              </button>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary btn-full" id="login-submit-btn">
+            <span>Masuk</span>
+            <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">login</span>
+          </button>
+        </form>
+
+        <!-- Action chips -->
+        <div class="auth-actions">
+          <button class="auth-chip auth-chip--blue" id="show-register-btn" type="button">
+            <span class="material-symbols-outlined">person_add</span>
+            <span>Intern baru? Daftar</span>
+          </button>
+          <button class="auth-chip auth-chip--amber" id="forgot-password-btn" type="button">
+            <span class="material-symbols-outlined">key_off</span>
+            <span>Lupa Password</span>
+          </button>
+          <button class="auth-chip auth-chip--gray" id="contact-admin-btn" type="button">
+            <span class="material-symbols-outlined">support_agent</span>
+            <span>Hubungi Admin</span>
+          </button>
         </div>
-        <button type="submit" class="btn-primary btn-full">
-          <span>Masuk</span>
-          <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">login</span>
-        </button>
-        <p class="login-forgot"><a href="#">Lupa kredensial? Hubungi Admin.</a></p>
-      </form>
-    </div>
+        <p class="login-copyright">&copy; 2026 Pillar System. All rights reserved.</p>
+      </div>
+
+      <!-- ══ PANEL REGISTER ══ -->
+      <div id="register-panel" class="auth-panel auth-panel--hidden">
+        <form id="register-form" class="login-form" novalidate>
+          <div class="form-group">
+            <label for="reg-name">Nama Lengkap</label>
+            <div class="input-wrap">
+              <span class="material-symbols-outlined input-icon">person</span>
+              <input type="text" id="reg-name" placeholder="Nama lengkap Anda" required autocomplete="name" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="reg-nik">NIK / ID Magang</label>
+            <div class="input-wrap">
+              <span class="material-symbols-outlined input-icon">badge</span>
+              <input type="text" id="reg-nik" placeholder="EMP-12345" required autocomplete="off" class="mono" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="reg-password">Password</label>
+            <div class="input-wrap">
+              <span class="material-symbols-outlined input-icon">lock</span>
+              <input type="password" id="reg-password" placeholder="Min. 6 karakter"
+                required minlength="6" autocomplete="new-password" />
+              <button type="button" class="password-toggle" id="toggle-reg-password"
+                aria-label="Tampilkan password" tabindex="-1">
+                <span class="material-symbols-outlined">visibility</span>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="reg-confirm">Konfirmasi Password</label>
+            <div class="input-wrap">
+              <span class="material-symbols-outlined input-icon">lock_reset</span>
+              <input type="password" id="reg-confirm" placeholder="Ulangi password"
+                required minlength="6" autocomplete="new-password" />
+              <button type="button" class="password-toggle" id="toggle-reg-confirm"
+                aria-label="Tampilkan password" tabindex="-1">
+                <span class="material-symbols-outlined">visibility</span>
+              </button>
+            </div>
+          </div>
+          <div class="reg-role-notice">
+            <span class="material-symbols-outlined" style="font-size:16px;flex-shrink:0;">info</span>
+            Akun baru otomatis berperan sebagai <strong>Intern</strong>.
+          </div>
+          <button type="submit" class="btn-primary btn-full" id="register-submit-btn">
+            <span>Buat Akun</span>
+            <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">how_to_reg</span>
+          </button>
+        </form>
+
+        <div class="auth-actions auth-actions--centered">
+          <button class="auth-chip auth-chip--gray" id="back-to-login-btn" type="button">
+            <span class="material-symbols-outlined">arrow_back</span>
+            <span>Sudah punya akun? Masuk</span>
+          </button>
+        </div>
+        <p class="login-copyright">&copy; 2026 Pillar System. All rights reserved.</p>
+      </div>
+
+    </div><!-- /.login-modal -->
   </section>
 
   <!-- ============================================================
@@ -106,19 +200,19 @@
             Dashboard
           </a>
         </li>
-        <li data-roles="intern,admin,manager">
+        <li data-roles="intern">
           <a href="#" class="nav-link" data-page="attendance">
             <span class="material-symbols-outlined">calendar_today</span>
             Kehadiran
           </a>
         </li>
-        <li data-roles="intern,admin,manager">
+        <li data-roles="intern">
           <a href="#" class="nav-link" data-page="performance">
             <span class="material-symbols-outlined">analytics</span>
             Kinerja
           </a>
         </li>
-        <li data-roles="intern,admin,manager">
+        <li data-roles="intern">
           <a href="#" class="nav-link" data-page="history">
             <span class="material-symbols-outlined">history</span>
             Riwayat
@@ -278,7 +372,7 @@
       <!-- ============================================================
          PAGE: ATTENDANCE (Intern primary)
          ============================================================ -->
-      <section class="page app-page" id="page-attendance" data-roles="intern,admin,manager">
+      <section class="page app-page" id="page-attendance" data-roles="intern">
         <div class="page-content">
           <!-- GPS Status Banner -->
           <div class="gps-banner validation" id="gps-banner">
@@ -375,13 +469,21 @@
       <section class="page app-page" id="page-performance" data-roles="intern,admin,manager">
         <div class="page-content">
           <div class="page-header perf-page-header">
-            <div>
-              <h2 class="page-title" id="perf-name">—</h2>
-              <p class="page-subtitle" id="perf-role">—</p>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <button class="btn-back" id="perf-back-btn" style="display: none;" title="Kembali ke Tim">
+                <span class="material-symbols-outlined">arrow_back</span>
+              </button>
+              <div>
+                <h2 class="page-title" id="perf-name">—</h2>
+                <p class="page-subtitle" id="perf-role">—</p>
+              </div>
             </div>
             <div class="page-header-actions">
               <button class="btn-outline" id="export-btn">
-                <span class="material-symbols-outlined">download</span> Ekspor Laporan
+                <span class="material-symbols-outlined">download</span> Ekspor CSV
+              </button>
+              <button class="btn-outline" id="export-pdf-btn">
+                <span class="material-symbols-outlined">picture_as_pdf</span> Ekspor PDF
               </button>
               <button class="btn-primary" id="manual-entry-btn" data-roles="admin,manager">Log Manual</button>
             </div>
@@ -432,7 +534,7 @@
       <!-- ============================================================
          PAGE: HISTORY
          ============================================================ -->
-      <section class="page app-page" id="page-history" data-roles="intern,admin,manager">
+      <section class="page app-page" id="page-history" data-roles="intern">
         <div class="page-content">
           <div class="page-header">
             <h2 class="page-title">Riwayat Kehadiran</h2>
@@ -482,9 +584,19 @@
          ============================================================ -->
       <section class="page app-page" id="page-team" data-roles="admin,manager">
         <div class="page-content">
-          <div class="page-header">
-            <h2 class="page-title">Tim</h2>
-            <p class="page-subtitle">Semua intern yang terdaftar dan status mereka saat ini.</p>
+          <div class="page-header perf-page-header">
+            <div>
+              <h2 class="page-title">Tim</h2>
+              <p class="page-subtitle">Semua intern yang terdaftar dan status mereka saat ini.</p>
+            </div>
+            <div class="page-header-actions">
+              <button class="btn-outline" id="team-export-btn">
+                <span class="material-symbols-outlined">download</span> Ekspor CSV
+              </button>
+              <button class="btn-outline" id="team-export-pdf-btn">
+                <span class="material-symbols-outlined">picture_as_pdf</span> Ekspor PDF
+              </button>
+            </div>
           </div>
           <div class="table-card">
             <div class="table-header">
@@ -546,6 +658,50 @@
         </div>
       </section>
 
+      <!-- ============================================================
+         PAGE: SIGN OUT CONFIRMATION
+         ============================================================ -->
+      <section class="page app-page" id="page-signout" data-roles="intern,admin,manager">
+        <div class="logout-container">
+          <div class="logout-card">
+            <div class="logout-header">
+              <div class="logout-icon-wrap">
+                <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">logout</span>
+              </div>
+              <h2 class="logout-title">Konfirmasi Keluar</h2>
+            </div>
+            
+            <div class="logout-body">
+              <p class="logout-subtitle-large">Apakah Anda yakin ingin keluar?</p>
+              <p class="logout-description">Mengakhiri sesi akan memerlukan Anda untuk masuk kembali untuk mengakses dasbor dan data Anda.</p>
+            </div>
+            
+            <div class="logout-actions">
+              <button id="confirm-logout-btn" class="btn-logout-confirm">
+                <span class="material-symbols-outlined">check_circle</span>
+                <span>Ya, Keluar</span>
+              </button>
+              <button class="btn-logout-cancel" onclick="window.history.back()">
+                <span>Batal</span>
+              </button>
+            </div>
+            
+            <div class="logout-meta">
+              <span id="logout-sess-id" class="mono">Sess_ID: 8829-XP-01</span>
+              <span class="mono">V2.4</span>
+            </div>
+          </div>
+          <p class="logout-helper-text">
+            Progres terakhir Anda di tab "Kinerja" telah disimpan secara otomatis.
+          </p>
+        </div>
+      </section>
+
+      <!-- FOOTER -->
+      <footer class="app-footer">
+        <p>&copy; 2026 Pillar Management System. All rights reserved.</p>
+      </footer>
+
     </div><!-- /#main-wrapper -->
 
     <!-- BOTTOM NAV (mobile) -->
@@ -554,15 +710,15 @@
         <span class="material-symbols-outlined">dashboard</span>
         <span>Beranda</span>
       </a>
-      <a href="#" class="bottom-nav-item" data-page="attendance" data-roles="intern,admin,manager">
+      <a href="#" class="bottom-nav-item" data-page="attendance" data-roles="intern">
         <span class="material-symbols-outlined">calendar_today</span>
         <span>Check-In</span>
       </a>
-      <a href="#" class="bottom-nav-item" data-page="performance" data-roles="intern,admin,manager">
+      <a href="#" class="bottom-nav-item" data-page="performance" data-roles="intern">
         <span class="material-symbols-outlined">analytics</span>
         <span>Statistik</span>
       </a>
-      <a href="#" class="bottom-nav-item" data-page="history" data-roles="intern,admin,manager">
+      <a href="#" class="bottom-nav-item" data-page="history" data-roles="intern">
         <span class="material-symbols-outlined">history</span>
         <span>Riwayat</span>
       </a>
@@ -621,8 +777,11 @@
     </div>
   </div>
 
+  <!-- Auth module — harus dimuat sebelum app.js -->
+  <script src="auth.js"></script>
+
   <!-- Terhubung ke file JS terpisah -->
-  <script src="app.js?v=1.1"></script>
+  <script src="app.js?v=1.2"></script>
 </body>
 
 </html>
